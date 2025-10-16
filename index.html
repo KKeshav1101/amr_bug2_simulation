@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bug2 AMR Simulation</title>
+  <style>
+    body {
+      background-color: #0b0e17;
+      color: #eee;
+      font-family: 'Poppins', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    canvas {
+      background-color: #111827;
+      border: 2px solid #00ffff44;
+      border-radius: 10px;
+      box-shadow: 0 0 10px #00ffff33;
+    }
+    #controls {
+      margin-top: 10px;
+      text-align: center;
+    }
+    button {
+      background: #00bcd4;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 16px;
+      padding: 10px 20px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    #log {
+      width: 600px;
+      height: 120px;
+      background: #1f2937;
+      overflow-y: auto;
+      border-radius: 10px;
+      margin-top: 10px;
+      padding: 8px;
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <h2>Bug2 AMR Simulation 🚗</h2>
+  <canvas id="simCanvas" width="600" height="400"></canvas>
+  <div id="controls">
+    <button id="initBtn">Initiate</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+  <div id="log"></div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    const logDiv = document.getElementById('log');
+
+    const robot = {
+      x: 100,
+      y: 300,
+      r: 10,
+      heading: 0,
+      speed: 2.2,
+      mode: 'goto', // goto, wall-follow, escape
+      stuckFrames: 0,
+      prevPos: {x: 0, y: 0}
+    };
+
+    let start = null, goal = null;
+    let obstacles = [
+      {x: 220, y: 150, w: 160, h: 100}
+    ];
+
+    function log(msg) {
+      logDiv.innerHTML += msg + '<br>';
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (!start) {
+        start = {x, y};
+        log('Start selected.');
+      } else if (!goal) {
+        goal = {x, y};
+        log('Goal selected.');
+      }
+    });
+
+    document.getElementById('initBtn').onclick = () => {
+      if (start && goal) {
+        robot.x = start.x;
+        robot.y = start.y;
+        robot.heading = Math.atan2(goal.y - start.y, goal.x - start.x);
+        log('Initiated Bug2 navigation.');
+        requestAnimationFrame(update);
+      }
+    };
+
+    document.getElementById('resetBtn').onclick = () => {
+      start = null; goal = null;
+      robot.x = 100; robot.y = 300; robot.mode = 'goto';
+      logDiv.innerHTML = '';
+      draw();
+    };
+
+    function sense() {
+      const dirs = [-Math.PI/4, 0, Math.PI/4, Math.PI];
+      return dirs.map(d => distanceToObstacle(robot.x, robot.y, robot.heading + d));
+    }
+
+    function distanceToObstacle(x, y, angle) {
+      const maxDist = 60;
+      for (let d = 0; d < maxDist; d += 2) {
+        const px = x + Math.cos(angle) * d;
+        const py = y + Math.sin(angle) * d;
+        for (let obs of obstacles) {
+          if (px > obs.x && px < obs.x + obs.w && py > obs.y && py < obs.y + obs.h) {
+            return d;
+          }
+        }
+      }
+      return maxDist;
+    }
+
+    function update() {
+      const [left, front, right] = sense();
+
+      const dx = robot.x - robot.prevPos.x;
+      const dy = robot.y - robot.prevPos.y;
+      const moved = Math.hypot(dx, dy);
+      robot.prevPos = {x: robot.x, y: robot.y};
+
+      if (moved < 0.5) robot.stuckFrames++; else robot.stuckFrames = 0;
+
+      if (robot.mode === 'goto') {
+        if (front < 15) {
+          robot.mode = 'wall-follow';
+          log('Obstacle hit. Switching to wall-follow mode.');
+        } else {
+          moveTowards(goal);
+        }
+      } else if (robot.mode === 'wall-follow') {
+        if (isOnMLine() && front > 30) {
+          robot.mode = 'goto';
+          log('Rejoining M-line. Switching to go-to-goal.');
+        } else if (robot.stuckFrames > 25) {
+          robot.mode = 'escape';
+          log('Corner detected. Escaping corner.');
+        } else {
+          followWall(left, front, right);
+        }
+      } else if (robot.mode === 'escape') {
+        escapeCorner();
+      }
+
+      draw();
+      if (goal && Math.hypot(goal.x - robot.x, goal.y - robot.y) > 10) {
+        requestAnimationFrame(update);
+      } else {
+        log('Goal reached ✅');
+      }
+    }
+
+    function moveTowards(target) {
+      const desired = Math.atan2(target.y - robot.y, target.x - robot.x);
+      robot.heading = desired;
+      robot.x += Math.cos(robot.heading) * robot.speed;
+      robot.y += Math.sin(robot.heading) * robot.speed;
+    }
+
+    function followWall(left, front, right) {
+      const safe = 20;
+      if (front < safe) {
+        robot.heading += 0.3;
+      } else if (right > safe) {
+        robot.heading -= 0.2;
+      } else if (left < safe) {
+        robot.heading += 0.2;
+      }
+      robot.x += Math.cos(robot.heading) * robot.speed;
+      robot.y += Math.sin(robot.heading) * robot.speed;
+    }
+
+    function escapeCorner() {
+      // Move back slightly
+      robot.x -= Math.cos(robot.heading) * 10;
+      robot.y -= Math.sin(robot.heading) * 10;
+      // Rotate away
+      robot.heading += (Math.random() > 0.5 ? 1 : -1) * 0.6;
+      robot.mode = 'wall-follow';
+      robot.stuckFrames = 0;
+    }
+
+    function isOnMLine() {
+      if (!start || !goal) return false;
+      const m = (goal.y - start.y) / (goal.x - start.x);
+      const expectedY = start.y + m * (robot.x - start.x);
+      return Math.abs(robot.y - expectedY) < 5;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw obstacles
+      ctx.fillStyle = '#ef4444';
+      for (let obs of obstacles) ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+
+      // Draw start/goal
+      if (start) { ctx.fillStyle = 'blue'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, 2*Math.PI); ctx.fill(); }
+      if (goal) { ctx.fillStyle = 'green'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 6, 0, 2*Math.PI); ctx.fill(); }
+
+      // Draw M-line
+      if (start && goal) {
+        ctx.strokeStyle = '#00ffff22';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(goal.x, goal.y);
+        ctx.stroke();
+      }
+
+      // Draw robot
+      ctx.fillStyle = 'pink';
+      ctx.beginPath();
+      ctx.arc(robot.x, robot.y, robot.r, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Direction indicator
+      ctx.strokeStyle = 'white';
+      ctx.beginPath();
+      ctx.moveTo(robot.x, robot.y);
+      ctx.lineTo(robot.x + Math.cos(robot.heading) * 15, robot.y + Math.sin(robot.heading) * 15);
+      ctx.stroke();
+    }
+
+    draw();
+  </script>
+</body>
+</html>
