@@ -265,7 +265,7 @@
       if (!start || !goal) return false;
       const m = (goal.y - start.y) / (goal.x - start.x);
       const expectedY = start.y + m * (robot.x - start.x);
-      return Math.abs(robot.y - expectedY) < 6;
+      return Math.abs(robot.y - expectedY) < Math.max(6, robot.speed*5);
     }
 
     function angleToGoal() {
