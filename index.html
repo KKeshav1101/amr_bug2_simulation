@@ -9,12 +9,57 @@
       background-color: #0b0e17;
       color: #eee;
       font-family: 'Poppins', sans-serif;
+      margin: 0;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #leftPanel {
+      flex: 2;
+      display: flex;
       align-items: center;
       justify-content: center;
-      height: 100vh;
-      margin: 0;
+    }
+    #rightPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px;
+    }
+    #topControls, #midControls, #bottomLog {
+      background: #1f2937;
+      border-radius: 12px;
+      box-shadow: 0 0 15px #00ffff33;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+    #topControls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-around;
+    }
+    #midControls {
+      text-align: center;
+    }
+    #bottomLog {
+      flex-grow: 1;
+      overflow-y: auto;
+    }
+    button, input[type=range] {
+      background: #00bcd4;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 15px;
+      padding: 8px 15px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    input[type=range] {
+      width: 120px;
+      accent-color: #00ffff;
     }
     canvas {
       background-color: #111827;
@@ -22,67 +67,65 @@
       border-radius: 10px;
       box-shadow: 0 0 10px #00ffff33;
     }
-    #controls {
-      margin-top: 10px;
-      text-align: center;
-    }
-    button {
-      background: #00bcd4;
-      border: none;
-      border-radius: 8px;
-      color: #fff;
-      font-size: 16px;
-      padding: 10px 20px;
-      cursor: pointer;
-      margin: 5px;
-    }
-    #log {
-      width: 600px;
-      height: 120px;
-      background: #1f2937;
-      overflow-y: auto;
-      border-radius: 10px;
-      margin-top: 10px;
-      padding: 8px;
-      font-size: 13px;
-      color: #cbd5e1;
-    }
   </style>
 </head>
 <body>
-  <h2>Bug2 AMR Simulation 🚗</h2>
-  <canvas id="simCanvas" width="600" height="400"></canvas>
-  <div id="controls">
-    <button id="initBtn">Initiate</button>
-    <button id="resetBtn">Reset</button>
+  <div id="leftPanel">
+    <canvas id="simCanvas" width="600" height="400"></canvas>
   </div>
-  <div id="log"></div>
+  <div id="rightPanel">
+    <div id="topControls">
+      <button id="initBtn">Initiate</button>
+      <button id="resetBtn">Reset</button>
+      <button id="addObsBtn">Add Obstacle</button>
+      <button id="removeObsBtn">Remove Obstacle</button>
+    </div>
+    <div id="midControls">
+      <label>Speed:</label>
+      <input type="range" id="speedSlider" min="0.3" max="3" step="0.1" value="1.0" /><br>
+      <label>Sensor FOV:</label>
+      <input type="range" id="fovSlider" min="20" max="120" step="5" value="60" />
+    </div>
+    <div id="bottomLog">
+      <div id="log" style="font-size:13px; color:#cbd5e1;"></div>
+    </div>
+  </div>
 
   <script>
     const canvas = document.getElementById('simCanvas');
     const ctx = canvas.getContext('2d');
     const logDiv = document.getElementById('log');
+    const speedSlider = document.getElementById('speedSlider');
+    const fovSlider = document.getElementById('fovSlider');
 
     const robot = {
       x: 100,
       y: 300,
       r: 10,
       heading: 0,
-      speed: 2.2,
-      mode: 'goto', // goto, wall-follow, escape
+      speed: 1.0,
+      mode: 'goto',
       stuckFrames: 0,
-      prevPos: {x: 0, y: 0}
+      prevPos: {x: 0, y: 0},
+      fov: 60
     };
 
     let start = null, goal = null;
-    let obstacles = [
-      {x: 220, y: 150, w: 160, h: 100}
-    ];
+    let obstacles = [ {x: 220, y: 150, w: 160, h: 100} ];
 
     function log(msg) {
       logDiv.innerHTML += msg + '<br>';
       logDiv.scrollTop = logDiv.scrollHeight;
     }
+
+    speedSlider.addEventListener('input', () => {
+      robot.speed = parseFloat(speedSlider.value);
+    });
+
+    fovSlider.addEventListener('input', () => {
+      robot.fov = parseFloat(fovSlider.value);
+      log('Sensor FOV adjusted to ' + robot.fov + '°');
+    });
 
     canvas.addEventListener('click', (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -114,8 +157,22 @@
       draw();
     };
 
+    document.getElementById('addObsBtn').onclick = () => {
+      const newObs = {x: Math.random()*500, y: Math.random()*300, w: 50+Math.random()*50, h: 50+Math.random()*50};
+      obstacles.push(newObs);
+      log('Added obstacle. Total: ' + obstacles.length);
+      draw();
+    };
+
+    document.getElementById('removeObsBtn').onclick = () => {
+      obstacles.pop();
+      log('Removed obstacle. Total: ' + obstacles.length);
+      draw();
+    };
+
     function sense() {
-      const dirs = [-Math.PI/4, 0, Math.PI/4, Math.PI];
+      const halfFov = (robot.fov * Math.PI / 180) / 2;
+      const dirs = [-halfFov, 0, halfFov, Math.PI];
       return dirs.map(d => distanceToObstacle(robot.x, robot.y, robot.heading + d));
     }
 
@@ -159,6 +216,10 @@
           log('Corner detected. Escaping corner.');
         } else {
           followWall(left, front, right);
+          if (front > 25 && Math.abs(angleToGoal()) < 0.3 && isOnMLine()) {
+            robot.mode = 'goto';
+            log('Rejoined M-line after wall-follow.');
+          }
         }
       } else if (robot.mode === 'escape') {
         escapeCorner();
@@ -193,10 +254,8 @@
     }
 
     function escapeCorner() {
-      // Move back slightly
       robot.x -= Math.cos(robot.heading) * 10;
       robot.y -= Math.sin(robot.heading) * 10;
-      // Rotate away
       robot.heading += (Math.random() > 0.5 ? 1 : -1) * 0.6;
       robot.mode = 'wall-follow';
       robot.stuckFrames = 0;
@@ -206,20 +265,21 @@
       if (!start || !goal) return false;
       const m = (goal.y - start.y) / (goal.x - start.x);
       const expectedY = start.y + m * (robot.x - start.x);
-      return Math.abs(robot.y - expectedY) < 5;
+      return Math.abs(robot.y - expectedY) < 6;
+    }
+
+    function angleToGoal() {
+      return Math.atan2(goal.y - robot.y, goal.x - robot.x) - robot.heading;
     }
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // Draw obstacles
       ctx.fillStyle = '#ef4444';
       for (let obs of obstacles) ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
 
-      // Draw start/goal
       if (start) { ctx.fillStyle = 'blue'; ctx.beginPath(); ctx.arc(start.x, start.y, 6, 0, 2*Math.PI); ctx.fill(); }
       if (goal) { ctx.fillStyle = 'green'; ctx.beginPath(); ctx.arc(goal.x, goal.y, 6, 0, 2*Math.PI); ctx.fill(); }
 
-      // Draw M-line
       if (start && goal) {
         ctx.strokeStyle = '#00ffff22';
         ctx.beginPath();
@@ -228,13 +288,11 @@
         ctx.stroke();
       }
 
-      // Draw robot
       ctx.fillStyle = 'pink';
       ctx.beginPath();
       ctx.arc(robot.x, robot.y, robot.r, 0, 2 * Math.PI);
       ctx.fill();
 
-      // Direction indicator
       ctx.strokeStyle = 'white';
       ctx.beginPath();
       ctx.moveTo(robot.x, robot.y);
